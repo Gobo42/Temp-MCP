@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "hub": "192.0.2.10",
+  "credentials_file": "credentials.json",
+  "mariadb_file": "mariadb.json",
+  "poll_interval_seconds": 60,
+  "history_interval_seconds": 1800,
+  "spool_directory": "/var/lib/tapo-telemetry/spool",
+  "spool_limit_bytes": 100000000,
+  "sensors": [
+    {
+      "id": "sensor-a",
+      "model": "T315",
+      "name": "Room A sensor",
+      "room": "Room A",
+      "enabled": true
+    },
+    {
+      "id": "sensor-b",
+      "model": "T310",
+      "name": "Room B sensor",
+      "room": "Room B",
+      "enabled": true
+    },
+    {
+      "id": "sensor-c",
+      "model": "T315",
+      "name": "Spare sensor",
+      "room": null,
+      "enabled": false
+    }
+  ]
+}

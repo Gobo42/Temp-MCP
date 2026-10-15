@@ -1,0 +1,57 @@
+# Local credentials
+/config/credentials.json
+/config/database-credentials.json
+/config/provision-tapoagent.sql
+/config/provision-mcpagent.sql
+/config/mcp-database-credentials.json
+credentials.json
+database-credentials.json
+/config/deployment/
+.aws/
+/target/
+__pycache__/
+
+# Compiled binaries, libraries and release artifacts
+/bin/
+/dist/
+/tapo-telemetry
+/tapo-telemetry-*
+*.exe
+*.bin
+*.dll
+*.so
+*.so.*
+*.dylib
+*.a
+*.lib
+*.o
+*.obj
+*.rlib
+*.rmeta
+*.test
+*.wasm
+*.pdb
+*.dSYM/
+
+# Local-only agent instructions and state
+AGENTS.md
+AGENTS.override.md
+CLAUDE.md
+GEMINI.md
+.agents/
+.codex/
+.claude/
+.gemini/
+superpowers/
+
+# Local environment files and network captures
+.env
+.env.*
+!.env.example
+*.har
+*.pcap
+*.pcapng
+
+# Keep every real configuration bundle private; publish root templates only
+/config/*
+!/config/*.example.json

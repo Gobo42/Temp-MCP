@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "hub": "192.0.2.10",
+  "credentials_file": "credentials.json",
+  "mariadb_file": "mariadb.json",
+  "poll_interval_seconds": 60,
+  "history_interval_seconds": 1800,
+  "spool_directory": "/var/lib/tapo-telemetry/spool",
+  "spool_limit_bytes": 100000000,
+  "sensors": [
+    {
+      "id": "example-sensor-id",
+      "model": "T315",
+      "name": "Temperature and Humidity Sensor",
+      "room": null,
+      "enabled": true
+    }
+  ]
+}

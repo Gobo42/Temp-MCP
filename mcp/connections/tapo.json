@@ -1,0 +1,5 @@
+{
+  "socket": "/run/mysqld/mysqld.sock",
+  "database": "tapoagent",
+  "credentials_file": "../credentials/tapo.json"
+}

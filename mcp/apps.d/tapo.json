@@ -1,0 +1,707 @@
+{
+  "version": 1,
+  "app_id": "tapo",
+  "description": "Stored environmental telemetry; collection age does not establish physical observation freshness.",
+  "connection_file": "../connections/tapo.json",
+  "database_user": "mcpagent",
+  "access": "read_only",
+  "grants": [
+    {
+      "table": "sensors",
+      "privileges": [
+        "SELECT"
+      ]
+    },
+    {
+      "table": "measurements",
+      "privileges": [
+        "SELECT"
+      ]
+    },
+    {
+      "table": "collector_status",
+      "privileges": [
+        "SELECT"
+      ]
+    },
+    {
+      "table": "schema_migrations",
+      "privileges": [
+        "SELECT"
+      ]
+    }
+  ],
+  "constants": {
+    "stale_seconds": 180
+  },
+  "schema_checks": [
+    {
+      "table": "sensors",
+      "columns": [
+        "id",
+        "hub_id",
+        "model",
+        "name",
+        "location",
+        "enabled",
+        "first_seen",
+        "last_seen"
+      ]
+    },
+    {
+      "table": "measurements",
+      "columns": [
+        "id",
+        "sensor_id",
+        "observed_at",
+        "collected_at",
+        "temperature_c",
+        "humidity_pct",
+        "low_battery",
+        "source",
+        "resolution_seconds"
+      ]
+    },
+    {
+      "table": "collector_status",
+      "columns": [
+        "sensor_id",
+        "last_attempt",
+        "last_success",
+        "consecutive_failures",
+        "last_error",
+        "updated_at"
+      ]
+    }
+  ],
+  "schema_version": {
+    "table": "schema_migrations",
+    "column": "version",
+    "expected": 1
+  },
+  "tools": [
+    {
+      "name": "list_sensors",
+      "description": "List persisted sensors, metadata and latest live collection age. A recent collection does not prove a recent physical measurement.",
+      "kind": "query",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 100
+          }
+        },
+        "additionalProperties": false
+      },
+      "timeout_seconds": 5,
+      "fields": [
+        {
+          "name": "sensor_id",
+          "type": "string"
+        },
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "location",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "model",
+          "type": "string"
+        },
+        {
+          "name": "stored_enabled",
+          "type": "boolean"
+        },
+        {
+          "name": "metadata_basis",
+          "type": "string"
+        },
+        {
+          "name": "reading_present",
+          "type": "boolean"
+        },
+        {
+          "name": "collected_at",
+          "type": "timestamp",
+          "nullable": true
+        },
+        {
+          "name": "age_seconds",
+          "type": "integer",
+          "nullable": true,
+          "description": "Age since collection; negative values indicate a future timestamp."
+        },
+        {
+          "name": "clock_anomaly",
+          "type": "boolean",
+          "nullable": true
+        },
+        {
+          "name": "collection_freshness",
+          "type": "string"
+        }
+      ],
+      "bindings": [
+        {
+          "source": "runtime",
+          "name": "now_utc",
+          "db_type": "timestamp"
+        },
+        {
+          "source": "runtime",
+          "name": "now_utc",
+          "db_type": "timestamp"
+        },
+        {
+          "source": "runtime",
+          "name": "now_utc",
+          "db_type": "timestamp"
+        },
+        {
+          "source": "runtime",
+          "name": "now_utc",
+          "db_type": "timestamp"
+        },
+        {
+          "source": "constant",
+          "name": "stale_seconds",
+          "db_type": "integer"
+        },
+        {
+          "source": "runtime",
+          "name": "fetch_limit",
+          "db_type": "integer"
+        }
+      ],
+      "max_rows": 1000,
+      "default_limit": 100,
+      "limit_argument": "limit",
+      "empty_result": "empty",
+      "sql": "WITH ranked AS (SELECT id, sensor_id, observed_at, collected_at, temperature_c, humidity_pct, low_battery, source, resolution_seconds, ROW_NUMBER() OVER (PARTITION BY sensor_id ORDER BY collected_at DESC, id DESC) AS rank_num FROM measurements WHERE source = 'live') SELECT s.id AS sensor_id, s.name AS name, s.location AS location, s.model AS model, s.enabled AS stored_enabled, 'last_persisted_collector_state' AS metadata_basis, CASE WHEN m.id IS NULL THEN 0 ELSE 1 END AS reading_present, m.collected_at AS collected_at, TIMESTAMPDIFF(SECOND, m.collected_at, ?) AS age_seconds, CASE WHEN m.id IS NULL THEN NULL WHEN m.collected_at > ? THEN 1 ELSE 0 END AS clock_anomaly, CASE WHEN m.id IS NULL THEN 'no_reading' WHEN m.collected_at > ? THEN 'clock_anomaly' WHEN TIMESTAMPDIFF(SECOND, m.collected_at, ?) > ? THEN 'stale' ELSE 'recent_collection' END AS collection_freshness FROM sensors s LEFT JOIN ranked m ON m.sensor_id = s.id AND m.rank_num = 1 ORDER BY s.id LIMIT ?"
+    },
+    {
+      "name": "get_current_conditions",
+      "description": "Read latest live conditions by optional sensor ID. Known sensors without data have reading_present=false; unknown selections return not_found.",
+      "kind": "query",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 100
+          },
+          "sensor_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9_-]{1,128}$",
+            "maxLength": 128
+          }
+        },
+        "additionalProperties": false
+      },
+      "timeout_seconds": 5,
+      "fields": [
+        {
+          "name": "sensor_id",
+          "type": "string"
+        },
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "location",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "model",
+          "type": "string"
+        },
+        {
+          "name": "stored_enabled",
+          "type": "boolean"
+        },
+        {
+          "name": "metadata_basis",
+          "type": "string"
+        },
+        {
+          "name": "reading_present",
+          "type": "boolean"
+        },
+        {
+          "name": "collected_at",
+          "type": "timestamp",
+          "nullable": true
+        },
+        {
+          "name": "age_seconds",
+          "type": "integer",
+          "nullable": true,
+          "description": "Age since collection; negative values indicate a future timestamp."
+        },
+        {
+          "name": "clock_anomaly",
+          "type": "boolean",
+          "nullable": true
+        },
+        {
+          "name": "collection_freshness",
+          "type": "string"
+        },
+        {
+          "name": "measurement_id",
+          "type": "bigint",
+          "nullable": true
+        },
+        {
+          "name": "observed_at",
+          "type": "timestamp",
+          "nullable": true
+        },
+        {
+          "name": "temperature_c",
+          "type": "number",
+          "nullable": true,
+          "units": "C"
+        },
+        {
+          "name": "humidity_pct",
+          "type": "number",
+          "nullable": true,
+          "units": "%"
+        },
+        {
+          "name": "low_battery",
+          "type": "boolean",
+          "nullable": true
+        },
+        {
+          "name": "observation_freshness_known",
+          "type": "boolean",
+          "description": "Live sensor data has no physical observation timestamp."
+        }
+      ],
+      "bindings": [
+        {
+          "source": "runtime",
+          "name": "now_utc",
+          "db_type": "timestamp"
+        },
+        {
+          "source": "runtime",
+          "name": "now_utc",
+          "db_type": "timestamp"
+        },
+        {
+          "source": "runtime",
+          "name": "now_utc",
+          "db_type": "timestamp"
+        },
+        {
+          "source": "runtime",
+          "name": "now_utc",
+          "db_type": "timestamp"
+        },
+        {
+          "source": "constant",
+          "name": "stale_seconds",
+          "db_type": "integer"
+        },
+        {
+          "source": "argument",
+          "name": "sensor_id",
+          "db_type": "string",
+          "nullable": true
+        },
+        {
+          "source": "argument",
+          "name": "sensor_id",
+          "db_type": "string",
+          "nullable": true
+        },
+        {
+          "source": "runtime",
+          "name": "fetch_limit",
+          "db_type": "integer"
+        }
+      ],
+      "max_rows": 1000,
+      "default_limit": 100,
+      "limit_argument": "limit",
+      "empty_result": "not_found",
+      "sql": "WITH ranked AS (SELECT id, sensor_id, observed_at, collected_at, temperature_c, humidity_pct, low_battery, source, resolution_seconds, ROW_NUMBER() OVER (PARTITION BY sensor_id ORDER BY collected_at DESC, id DESC) AS rank_num FROM measurements WHERE source = 'live') SELECT s.id AS sensor_id, s.name AS name, s.location AS location, s.model AS model, s.enabled AS stored_enabled, 'last_persisted_collector_state' AS metadata_basis, CASE WHEN m.id IS NULL THEN 0 ELSE 1 END AS reading_present, m.collected_at AS collected_at, TIMESTAMPDIFF(SECOND, m.collected_at, ?) AS age_seconds, CASE WHEN m.id IS NULL THEN NULL WHEN m.collected_at > ? THEN 1 ELSE 0 END AS clock_anomaly, CASE WHEN m.id IS NULL THEN 'no_reading' WHEN m.collected_at > ? THEN 'clock_anomaly' WHEN TIMESTAMPDIFF(SECOND, m.collected_at, ?) > ? THEN 'stale' ELSE 'recent_collection' END AS collection_freshness, m.id AS measurement_id, m.observed_at AS observed_at, m.temperature_c AS temperature_c, m.humidity_pct AS humidity_pct, m.low_battery AS low_battery, 0 AS observation_freshness_known FROM sensors s LEFT JOIN ranked m ON m.sensor_id = s.id AND m.rank_num = 1 WHERE (? IS NULL OR s.id = ?) ORDER BY s.id LIMIT ?"
+    },
+    {
+      "name": "get_sensor_history",
+      "description": "Read live snapshots or completed history intervals separately in [start,end). History uses observed time; live uses collection time. A known sensor without data returns a presence row.",
+      "kind": "query",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 500
+          },
+          "sensor_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$",
+            "maxLength": 128
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "live",
+              "history"
+            ],
+            "default": "history"
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "sensor_id",
+          "start",
+          "end"
+        ]
+      },
+      "timeout_seconds": 5,
+      "fields": [
+        {
+          "name": "sensor_id",
+          "type": "string"
+        },
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "location",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "requested_source",
+          "type": "string"
+        },
+        {
+          "name": "reading_present",
+          "type": "boolean"
+        },
+        {
+          "name": "data_status",
+          "type": "string"
+        },
+        {
+          "name": "measurement_id",
+          "type": "bigint",
+          "nullable": true
+        },
+        {
+          "name": "source",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "reading_at",
+          "type": "timestamp",
+          "nullable": true
+        },
+        {
+          "name": "observed_at",
+          "type": "timestamp",
+          "nullable": true
+        },
+        {
+          "name": "collected_at",
+          "type": "timestamp",
+          "nullable": true
+        },
+        {
+          "name": "temperature_c",
+          "type": "number",
+          "nullable": true,
+          "units": "C"
+        },
+        {
+          "name": "humidity_pct",
+          "type": "number",
+          "nullable": true,
+          "units": "%"
+        },
+        {
+          "name": "low_battery",
+          "type": "boolean",
+          "nullable": true
+        },
+        {
+          "name": "resolution_seconds",
+          "type": "integer",
+          "nullable": true,
+          "units": "s"
+        }
+      ],
+      "bindings": [
+        {
+          "source": "argument",
+          "name": "source",
+          "db_type": "string"
+        },
+        {
+          "source": "argument",
+          "name": "source",
+          "db_type": "string"
+        },
+        {
+          "source": "argument",
+          "name": "source",
+          "db_type": "string"
+        },
+        {
+          "source": "argument",
+          "name": "start",
+          "db_type": "timestamp"
+        },
+        {
+          "source": "argument",
+          "name": "end",
+          "db_type": "timestamp"
+        },
+        {
+          "source": "argument",
+          "name": "source",
+          "db_type": "string"
+        },
+        {
+          "source": "argument",
+          "name": "start",
+          "db_type": "timestamp"
+        },
+        {
+          "source": "argument",
+          "name": "end",
+          "db_type": "timestamp"
+        },
+        {
+          "source": "argument",
+          "name": "sensor_id",
+          "db_type": "string"
+        },
+        {
+          "source": "runtime",
+          "name": "fetch_limit",
+          "db_type": "integer"
+        }
+      ],
+      "max_rows": 1000,
+      "default_limit": 500,
+      "limit_argument": "limit",
+      "empty_result": "not_found",
+      "constraints": [
+        {
+          "kind": "time_range",
+          "start": "start",
+          "end": "end",
+          "max_seconds": 2678400
+        }
+      ],
+      "sql": "SELECT s.id AS sensor_id, s.name AS name, s.location AS location, CAST(? AS CHAR) AS requested_source, CASE WHEN m.id IS NULL THEN 0 ELSE 1 END AS reading_present, CASE WHEN m.id IS NULL THEN 'no_readings_in_range' ELSE 'data_available' END AS data_status, m.id AS measurement_id, m.source AS source, CASE WHEN m.source = 'live' THEN m.collected_at ELSE m.observed_at END AS reading_at, m.observed_at AS observed_at, m.collected_at AS collected_at, m.temperature_c AS temperature_c, m.humidity_pct AS humidity_pct, m.low_battery AS low_battery, m.resolution_seconds AS resolution_seconds FROM sensors s LEFT JOIN measurements m ON m.sensor_id = s.id AND m.source = ? AND ((? = 'live' AND m.collected_at >= ? AND m.collected_at < ?) OR (? = 'history' AND m.observed_at >= ? AND m.observed_at < ?)) WHERE s.id = ? ORDER BY CASE WHEN m.source = 'live' THEN m.collected_at ELSE m.observed_at END, m.id LIMIT ?"
+    },
+    {
+      "name": "get_collection_health",
+      "description": "Read database-visible collection status by optional sensor ID; does not inspect systemd, spool files or hub connectivity.",
+      "kind": "query",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 100
+          },
+          "sensor_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9_-]{1,128}$",
+            "maxLength": 128
+          }
+        },
+        "additionalProperties": false
+      },
+      "timeout_seconds": 5,
+      "fields": [
+        {
+          "name": "sensor_id",
+          "type": "string"
+        },
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "location",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "model",
+          "type": "string"
+        },
+        {
+          "name": "stored_enabled",
+          "type": "boolean"
+        },
+        {
+          "name": "metadata_basis",
+          "type": "string"
+        },
+        {
+          "name": "reading_present",
+          "type": "boolean"
+        },
+        {
+          "name": "collected_at",
+          "type": "timestamp",
+          "nullable": true
+        },
+        {
+          "name": "age_seconds",
+          "type": "integer",
+          "nullable": true,
+          "description": "Age since collection; negative values indicate a future timestamp."
+        },
+        {
+          "name": "clock_anomaly",
+          "type": "boolean",
+          "nullable": true
+        },
+        {
+          "name": "collection_freshness",
+          "type": "string"
+        },
+        {
+          "name": "status_present",
+          "type": "boolean"
+        },
+        {
+          "name": "last_attempt",
+          "type": "timestamp",
+          "nullable": true
+        },
+        {
+          "name": "last_success",
+          "type": "timestamp",
+          "nullable": true
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp",
+          "nullable": true
+        },
+        {
+          "name": "consecutive_failures",
+          "type": "integer",
+          "nullable": true
+        },
+        {
+          "name": "last_error",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "health",
+          "type": "string",
+          "description": "Database-visible collection status only."
+        }
+      ],
+      "bindings": [
+        {
+          "source": "runtime",
+          "name": "now_utc",
+          "db_type": "timestamp"
+        },
+        {
+          "source": "runtime",
+          "name": "now_utc",
+          "db_type": "timestamp"
+        },
+        {
+          "source": "runtime",
+          "name": "now_utc",
+          "db_type": "timestamp"
+        },
+        {
+          "source": "runtime",
+          "name": "now_utc",
+          "db_type": "timestamp"
+        },
+        {
+          "source": "constant",
+          "name": "stale_seconds",
+          "db_type": "integer"
+        },
+        {
+          "source": "runtime",
+          "name": "now_utc",
+          "db_type": "timestamp"
+        },
+        {
+          "source": "runtime",
+          "name": "now_utc",
+          "db_type": "timestamp"
+        },
+        {
+          "source": "constant",
+          "name": "stale_seconds",
+          "db_type": "integer"
+        },
+        {
+          "source": "argument",
+          "name": "sensor_id",
+          "db_type": "string",
+          "nullable": true
+        },
+        {
+          "source": "argument",
+          "name": "sensor_id",
+          "db_type": "string",
+          "nullable": true
+        },
+        {
+          "source": "runtime",
+          "name": "fetch_limit",
+          "db_type": "integer"
+        }
+      ],
+      "max_rows": 1000,
+      "default_limit": 100,
+      "limit_argument": "limit",
+      "empty_result": "not_found",
+      "sql": "WITH ranked AS (SELECT id, sensor_id, observed_at, collected_at, temperature_c, humidity_pct, low_battery, source, resolution_seconds, ROW_NUMBER() OVER (PARTITION BY sensor_id ORDER BY collected_at DESC, id DESC) AS rank_num FROM measurements WHERE source = 'live') SELECT s.id AS sensor_id, s.name AS name, s.location AS location, s.model AS model, s.enabled AS stored_enabled, 'last_persisted_collector_state' AS metadata_basis, CASE WHEN m.id IS NULL THEN 0 ELSE 1 END AS reading_present, m.collected_at AS collected_at, TIMESTAMPDIFF(SECOND, m.collected_at, ?) AS age_seconds, CASE WHEN m.id IS NULL THEN NULL WHEN m.collected_at > ? THEN 1 ELSE 0 END AS clock_anomaly, CASE WHEN m.id IS NULL THEN 'no_reading' WHEN m.collected_at > ? THEN 'clock_anomaly' WHEN TIMESTAMPDIFF(SECOND, m.collected_at, ?) > ? THEN 'stale' ELSE 'recent_collection' END AS collection_freshness, CASE WHEN cs.sensor_id IS NULL THEN 0 ELSE 1 END AS status_present, cs.last_attempt AS last_attempt, cs.last_success AS last_success, cs.updated_at AS updated_at, cs.consecutive_failures AS consecutive_failures, cs.last_error AS last_error, CASE WHEN cs.sensor_id IS NULL THEN 'unknown' WHEN cs.last_success IS NULL OR cs.consecutive_failures > 0 OR m.id IS NULL OR m.collected_at > ? OR TIMESTAMPDIFF(SECOND, m.collected_at, ?) > ? THEN 'degraded' ELSE 'healthy' END AS health FROM sensors s LEFT JOIN ranked m ON m.sensor_id = s.id AND m.rank_num = 1 LEFT JOIN collector_status cs ON cs.sensor_id = s.id WHERE (? IS NULL OR s.id = ?) ORDER BY s.id LIMIT ?"
+    }
+  ]
+}
